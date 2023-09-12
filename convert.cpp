@@ -1,76 +1,96 @@
 #include <iostream>
 #include <fstream>
-#include <sstream>
+#include <string>
 #include <vector>
-#include <bitset>
+#include <cstdint> // for uint8_t
 
-const int MAX_BYTES = 65536;
+std::string sanitizeForIdentifier(const std::string &str)
+{
+    std::string result;
+    for (char c : str)
+    {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c == '_') || (result.size() > 0 && c >= '0' && c <= '9'))
+            result += c;
+        else
+            result += "_";
+    }
+    if (result.empty() || (result[0] >= '0' && result[0] <= '9'))
+        result = "_" + result; // Identifiers cannot start with a number
 
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <filename> [int1] [int2]" << std::endl;
+    return result;
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc < 2)
+    {
+        std::cerr << "Usage: " << argv[0] << " <filename> [max_bytes]" << std::endl;
         return 1;
     }
 
-    int int1 = 0, int2 = 35;
-    if (argc >= 4) {
-        int1 = std::stoi(argv[2]);
-        int2 = std::stoi(argv[3]);
-    }
+    std::string inputFilename = argv[1];
+    std::string baseFilename = inputFilename.substr(0, inputFilename.find_last_of("."));
+    int maxBytes = INT_MAX;
+    if (argc > 2)
+        maxBytes = std::stoi(argv[2]);
 
-    std::ifstream inFile(argv[1]);
-    if (!inFile) {
-        std::cerr << "Error: Cannot open input file." << std::endl;
+    std::ifstream inputFile(inputFilename);
+    if (!inputFile.is_open())
+    {
+        std::cerr << "Failed to open input file: " << inputFilename << std::endl;
         return 1;
     }
+
+    std::vector<uint8_t> dataArray;
 
     std::string line;
-    std::vector<int> output;
-    while (std::getline(inFile, line) && output.size() < MAX_BYTES) {
-        std::string hexData = line.substr(line.find(":") + 1);
-        for (size_t i = 0; i < hexData.size() && output.size() < MAX_BYTES; i += 2) {
-            std::string byteStr = hexData.substr(i, 2);
-            int byteVal = std::stoi(byteStr, nullptr, 16);
-            std::bitset<8> bits(byteVal);
-            for (int j = 7; j >= 0 && output.size() < MAX_BYTES; --j) {
-                output.push_back(bits[j] ? int2 : int1);
+    int lineCount = 0;
+    while (std::getline(inputFile, line) && dataArray.size() < maxBytes)
+    {
+        lineCount++;
+        size_t pos = line.find(":");
+        if (pos != std::string::npos)
+        {
+            std::string hexData = line.substr(pos + 1);
+            for (size_t i = 0; i < hexData.length() && dataArray.size() < maxBytes; i += 2)
+            {
+                uint8_t byte = std::stoul(hexData.substr(i, 2), nullptr, 16);
+                dataArray.push_back(byte);
             }
         }
     }
 
-    std::string baseFilename = argv[1];
-    size_t pos = baseFilename.find_last_of(".");
-    if (pos != std::string::npos) {
-        baseFilename = baseFilename.substr(0, pos);
-    }
-    std::string validName = baseFilename;
-    for (char& c : validName) {
-        if (!isalnum(c)) {
-            c = '_';
-        }
-    }
+    inputFile.close();
 
-    std::ofstream cppFile(baseFilename + ".cpp");
-    std::ofstream hFile(baseFilename + ".h");
+    std::string cppFilename = baseFilename + ".cpp";
+    std::string hFilename = baseFilename + ".h";
+    std::string arrayName = sanitizeForIdentifier(baseFilename);
 
-    hFile << "#ifndef " << validName << "_H" << std::endl;
-    hFile << "#define " << validName << "_H" << std::endl;
-    hFile << "extern const int " << validName << "[];" << std::endl;
-    hFile << "extern const int " << validName << "_length;" << std::endl;
-    hFile << "#endif" << std::endl;
+    std::ofstream cppFile(cppFilename);
+    std::ofstream hFile(hFilename);
 
-    cppFile << "#include \"" << baseFilename << ".h\"" << std::endl;
-    cppFile << "const int " << validName << "[] = {";
-    for (size_t i = 0; i < output.size(); ++i) {
-        cppFile << output[i];
-        if (i != output.size() - 1) {
+    hFile << "#pragma once\n";
+    hFile << "#include <cstdint>\n\n";
+    hFile << "extern const uint8_t " << arrayName << "[];\n";
+    hFile << "extern const int dataSize;\n";
+
+    cppFile << "#include \"" << baseFilename << ".h\"\n\n";
+    cppFile << "const uint8_t " << arrayName << "[] = {";
+    for (size_t i = 0; i < dataArray.size(); ++i)
+    {
+        if (i != 0)
             cppFile << ",";
-        }
+        cppFile << static_cast<int>(dataArray[i]);
     }
-    cppFile << "};" << std::endl;
-    cppFile << "const int " << validName << "_length = " << output.size() << ";" << std::endl;
+    cppFile << "};\n";
+    cppFile << "const int dataSize = " << dataArray.size() << ";\n";
 
-    std::cout << "Generated files: " << baseFilename << ".cpp and " << baseFilename << ".h" << std::endl;
+    cppFile.close();
+    hFile.close();
+
+    std::cout << "Written to files: " << cppFilename << " and " << hFilename << std::endl;
+    std::cout << "Number of lines processed: " << lineCount << std::endl;
+    std::cout << "Number of bytes in array: " << dataArray.size() << std::endl;
 
     return 0;
 }
